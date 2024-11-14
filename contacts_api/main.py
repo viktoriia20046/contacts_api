@@ -1,78 +1,62 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session
-from . import models, schemas
-from .database import engine, SessionLocal
-from typing import List
-from datetime import date, timedelta
-from models import Contact  
-from schemas import ContactCreate  
-
-models.Base.metadata.create_all(bind=engine)
+from database import get_db  # Перевірте правильність шляху
+import models  # Замініть відносні імпорти на абсолютні
+import schemas  # Замініть відносні імпорти на абсолютні
 
 app = FastAPI()
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+# Приклад маршруту для створення контакту
 @app.post("/contacts/", response_model=schemas.Contact)
 def create_contact(contact: schemas.ContactCreate, db: Session = Depends(get_db)):
-    db_contact = models.Contact(**contact.dict())
-    db.add(db_contact)
+    new_contact = models.Contact(**contact.dict())
+    db.add(new_contact)
     db.commit()
-    db.refresh(db_contact)
-    return db_contact
+    db.refresh(new_contact)
+    return new_contact
 
-@app.get("/contacts/", response_model=List[schemas.Contact])
-def read_contacts(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
-    contacts = db.query(models.Contact).offset(skip).limit(limit).all()
+# Приклад маршруту для отримання всіх контактів
+@app.get("/contacts/", response_model=list[schemas.Contact])
+def get_contacts(db: Session = Depends(get_db)):
+    contacts = db.query(models.Contact).all()
     return contacts
 
+# Приклад маршруту для отримання контакту за ID
 @app.get("/contacts/{contact_id}", response_model=schemas.Contact)
-def read_contact(contact_id: int, db: Session = Depends(get_db)):
+def get_contact(contact_id: int, db: Session = Depends(get_db)):
     contact = db.query(models.Contact).filter(models.Contact.id == contact_id).first()
-    if contact is None:
-        raise HTTPException(status_code=404, detail="Contact not found")
+    if not contact:
+        raise HTTPException(status_code=404, detail="Контакт не знайдено")
     return contact
 
+# Приклад маршруту для оновлення контакту
 @app.put("/contacts/{contact_id}", response_model=schemas.Contact)
-def update_contact(contact_id: int, contact: schemas.ContactUpdate, db: Session = Depends(get_db)):
-    db_contact = db.query(models.Contact).filter(models.Contact.id == contact_id).first()
-    if db_contact is None:
-        raise HTTPException(status_code=404, detail="Contact not found")
-    for key, value in contact.dict().items():
-        setattr(db_contact, key, value)
+def update_contact(contact_id: int, updated_contact: schemas.ContactCreate, db: Session = Depends(get_db)):
+    contact = db.query(models.Contact).filter(models.Contact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Контакт не знайдено")
+    for key, value in updated_contact.dict().items():
+        setattr(contact, key, value)
     db.commit()
-    db.refresh(db_contact)
-    return db_contact
+    db.refresh(contact)
+    return contact
 
-@app.delete("/contacts/{contact_id}", response_model=schemas.Contact)
+# Приклад маршруту для видалення контакту
+@app.delete("/contacts/{contact_id}")
 def delete_contact(contact_id: int, db: Session = Depends(get_db)):
-    db_contact = db.query(models.Contact).filter(models.Contact.id == contact_id).first()
-    if db_contact is None:
-        raise HTTPException(status_code=404, detail="Contact not found")
-    db.delete(db_contact)
+    contact = db.query(models.Contact).filter(models.Contact.id == contact_id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Контакт не знайдено")
+    db.delete(contact)
     db.commit()
-    return db_contact
+    return {"detail": "Контакт успішно видалено"}
 
-@app.get("/contacts/search/", response_model=List[schemas.Contact])
-def search_contacts(query: str, db: Session = Depends(get_db)):
-    contacts = db.query(models.Contact).filter(
-        (models.Contact.first_name.ilike(f"%{query}%")) |
-        (models.Contact.last_name.ilike(f"%{query}%")) |
-        (models.Contact.email.ilike(f"%{query}%"))
-    ).all()
-    return contacts
+# Приклад маршруту для отримання контактів з найближчими днями народження
+from datetime import date, timedelta
 
-@app.get("/contacts/upcoming_birthdays/", response_model=List[schemas.Contact])
+@app.get("/contacts/upcoming_birthdays/", response_model=list[schemas.Contact])
 def get_upcoming_birthdays(db: Session = Depends(get_db)):
     today = date.today()
     upcoming = today + timedelta(days=7)
-    contacts = db.query(models.Contact).filter(
-        models.Contact.birthday >= today,
-        models.Contact.birthday <= upcoming
-    ).all()
+    contacts = db.query(models.Contact).filter(models.Contact.birthday.between(today, upcoming)).all()
     return contacts
